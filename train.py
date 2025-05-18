@@ -113,15 +113,19 @@ def main(input_root, output_root, num_epoch, model_name):
 
     # ================== 数据增强 (显存优化版) ================== #
     train_tf = transforms.Compose([
-        transforms.Resize(256),
-        transforms.RandomCrop(224),
+        transforms.RandomResizedCrop(224, scale=(0.7, 1.0)),  # 随机缩放裁剪
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(15),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1),  # 适度增强
+        transforms.RandomRotation(20),
+        transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.03),
+        transforms.RandomPerspective(distortion_scale=0.3, p=0.4),
+        transforms.RandomAffine(degrees=15, translate=(0.1, 0.1), scale=(0.85, 1.15), shear=10),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        transforms.Normalize([0.485, 0.456, 0.406],
+                             [0.229, 0.224, 0.225]),
+        transforms.RandomErasing(p=0.5, scale=(0.02, 0.2), ratio=(0.3, 3.3)),
     ])
+
     val_tf = transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(224),
@@ -166,6 +170,7 @@ def main(input_root, output_root, num_epoch, model_name):
         lr=base_lr,
         weight_decay=wd
     )
+
     # 使用带 warmup 的余弦退火
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer,
@@ -220,13 +225,14 @@ def main(input_root, output_root, num_epoch, model_name):
         y_true_val = np.concatenate(ys_val, axis=0)
         y_score_val = np.concatenate(yps_val, axis=0)
         val_auc = getAUC(y_true_val, y_score_val, task="multi-class")
-        print(f"[Epoch {epoch}/{num_epoch}] Val AUC: {val_auc:.4f} Train Loss: {total_loss / len(train_loader):.10f}")
+        val_acc = getACC(y_true_val, y_score_val, task="multi-class")
+        print(f"[Epoch {epoch}/{num_epoch}] Val AUC: {val_auc:.4f} Val ACC:{val_acc:.4f} Train Loss: {total_loss / len(train_loader):.10f}")
 
         # 保存当前最佳
         if val_auc > run_best_auc:
             run_best_auc = val_auc
             run_best_path = save_checkpoint(model, epoch, val_auc, ckpt_dir, 'run_best', model_name)
-            print(f">>> New run-best at epoch {epoch}, AUC={val_auc:.4f}")
+            print(f">>> New run-best at epoch {epoch}, AUC={val_auc:.4f} ACC:{val_acc:.4f}")
 
     # ================== 最终测试 ================== #
     print("\n===== Testing FINAL model (last epoch) =====")
@@ -275,14 +281,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_root', required=True, help="数据集根目录")
     parser.add_argument('--output_root', default='./output', help="结果保存目录")
-    parser.add_argument('--num_epoch', type=int, default=100, help="训练轮数")
+    parser.add_argument('--num_epoch', type=int, default=64, help="训练轮数")
     parser.add_argument('--model', default='convnext_small',
                         choices=['resnet18', 'resnet50', 'efficientnet_b0', 'efficientnet_b1',
                                  'convnext_tiny', 'convnext_small', 'densenet121', 'convnext_base'],
                         help="网络型号")
     args = parser.parse_args()
 
+    # 权重处理
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cls_counts = torch.tensor([374, 254, 1372], dtype=torch.float32)
+    cls_weights = 1.0 / cls_counts
+    cls_weights = cls_weights / cls_weights.sum()
+    cls_weights = cls_weights.to(device)
     # 定义损失函数
-    criterion = nn.CrossEntropyLoss()
-
+    criterion = nn.CrossEntropyLoss(weight=cls_weights)
     main(args.input_root, args.output_root, args.num_epoch, args.model)

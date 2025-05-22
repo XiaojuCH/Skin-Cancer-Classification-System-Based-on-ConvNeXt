@@ -34,9 +34,54 @@ warnings.filterwarnings(
 )
 
 # 自定义模块
+# 自定义模块
 from models import get_model
 from dataset import ISIC2017Dataset
 from evaluator import getAUC, getACC, save_results
+
+# === MixUp utility ===
+def mixup_data(x, y, alpha=0.4):
+    '''Returns mixed inputs, pairs of targets, and lambda'''
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+    batch_size = x.size()[0]
+    index = torch.randperm(batch_size).to(x.device)
+    mixed_x = lam * x + (1 - lam) * x[index]
+    y_a, y_b = y, y[index]
+    return mixed_x, y_a, y_b, lam
+
+
+def mixup_criterion(criterion, pred, y_a, y_b, lam):
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+
+# ============================
+
+def save_checkpoint(model, epoch, val_auc, save_dir, name, model_name):
+    state = {'net': model.state_dict(), 'epoch': epoch,
+             'val_auc': val_auc, 'model_name': model_name}
+    path = os.path.join(save_dir, f'{name}.pth')
+    torch.save(state, path)
+    return path
+
+# --------- Ensemble test ----------
+def test_ensemble(models, loader, device, output_root, result_name):
+    ys, yps = [], []
+    for imgs, labels in loader:
+        imgs = imgs.to(device)
+        with autocast(device_type='cuda'):
+            probs = sum(torch.softmax(m(imgs), dim=1) for m in models) / len(models)
+        yps.append(probs.cpu().numpy())
+        ys.append(labels.numpy())
+    y_true = np.concatenate(ys, axis=0)
+    y_score = np.concatenate(yps, axis=0)
+    auc = getAUC(y_true, y_score, task="multi-class")
+    acc = getACC(y_true, y_score, task="multi-class")
+    print(f'[{result_name}] Ensemble Test AUC: {auc:.4f}  ACC: {acc:.4f}')
+    os.makedirs(output_root, exist_ok=True)
+    save_results(y_true, y_score, os.path.join(output_root, result_name))
+    return auc, acc
 
 
 def save_checkpoint(model, epoch, val_auc, save_dir, name, model_name):

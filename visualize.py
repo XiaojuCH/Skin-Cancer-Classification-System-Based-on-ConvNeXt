@@ -15,7 +15,7 @@ plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 # 手动设置参数
-IMAGE_PATH = "00_M.jpg"
+IMAGE_PATH = "01.jpg"
 CHECKPOINT_PATH = "output/checkpoints/global_best.pth"
 MODEL_NAME = "convnext_small"
 NUM_CLASSES = 3

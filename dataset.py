@@ -66,9 +66,10 @@ class ISIC2017Dataset(Dataset):
     def __getitem__(self, idx):
         img_path = self.image_paths[idx]
         label = self.labels[idx]
+        assert self.transform is None or callable(self.transform), f"transform={self.transform!r}"
 
         image = Image.open(img_path).convert('RGB')
-        if self.transform:
+        if self.transform:               # 只有当你传了 transform（如 train_tf）时才会执行
             image = self.transform(image)
 
         lbl = torch.tensor(label, dtype=torch.long)
